@@ -1,0 +1,5 @@
+#include <windows.h>
+#include <stdio.h>
+#include <vector>
+#include <stdint.h>
+int main(int argc,char**argv){if(argc!=3)return 1;HMODULE m=LoadLibraryA(argv[1]);if(!m){printf("LoadLibrary error=%lu\n",GetLastError());return 2;}auto fn=(int(__cdecl*)(void*,const unsigned char*))GetProcAddress(m,"TestHookJxl");if(!fn)return 3;auto fallback=(int(__cdecl*)())GetProcAddress(m,"TestHookFallback");auto trampoline=(int(__cdecl*)())GetProcAddress(m,"TestTrampoline");if(!fallback||!trampoline)return 8;printf("fallback=%d trampoline=%d\n",fallback(),trampoline());if(fallback()||trampoline())return 9;FILE*f=fopen(argv[2],"rb");if(!f)return 4;fseek(f,0,2);size_t n=ftell(f);rewind(f);std::vector<unsigned char>in(n);fread(in.data(),1,n,f);fclose(f);size_t w=*(uint16_t*)(in.data()+16),h=*(uint16_t*)(in.data()+18);std::vector<unsigned char>out(16+w*h*4+32,0xa5);int rc=fn(out.data(),in.data());bool guard=true;for(size_t i=16+w*h*4;i<out.size();i++)guard &= out[i]==0xa5;printf("hook rc=%d width=%u height=%u depth=%u format=%u guard=%d\n",rc,*(uint16_t*)out.data(),*(uint16_t*)(out.data()+2),*(uint16_t*)(out.data()+4),*(uint16_t*)(out.data()+8),guard);return rc||!guard;}

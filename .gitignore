@@ -1,0 +1,16 @@
+build/
+*.dll
+*.exe
+*.arc
+*.jxl
+*.cbgjxl
+*.png
+*.mpg
+*.mp4
+*.mkv
+__pycache__/
+*.log
+batch/
+original/
+candidate/
+scratch/
