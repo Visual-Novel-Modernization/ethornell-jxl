@@ -1,4 +1,5 @@
 build/
+build64/
 *.dll
 *.exe
 *.arc

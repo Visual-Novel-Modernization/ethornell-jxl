@@ -354,7 +354,9 @@ def self_test(root: pathlib.Path):
     repl=output_dir/"0.cbgjxl";repl.write_bytes(replacement)
     status={"archive":"title_fixture.arc","index":0,"name":"title_all",
       "source_sha256":hashlib.sha256(payload0).hexdigest(),"output_sha256":hashlib.sha256(replacement).hexdigest(),
-      "original_bytes":len(payload0),"new_bytes":len(replacement),"status":"converted"}
+      "original_bytes":len(payload0),"new_bytes":len(replacement),"status":"converted",
+       "decode_verified":True,"decoder_max_channel_difference":0,"decoder_rmse":0,
+       "policy_version":"opaque-type1-v1","validation_schema":"jxl-cbg-v2"}
     (status_dir/"title.json").write_text(json.dumps([status]),encoding="utf-8")
     statuses=load_statuses(status_dir)
     # Adapt output root: helper expects batch/output/<stem> and archive stem.

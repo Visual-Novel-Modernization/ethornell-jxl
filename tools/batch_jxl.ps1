@@ -4,7 +4,8 @@ param(
     [int]$Limit = 0,
     [string]$GameDir = '.',
     [string]$GARbroPath = $env:GARBRO_PATH,
-    [string]$JxlBinDir = $env:JXL_BIN_DIR
+    [string]$JxlBinDir = $env:JXL_BIN_DIR,
+    [string]$DecoderPath = $env:JXL_DECODER_PATH
 )
 $ErrorActionPreference = 'Stop'
 $root = if ([System.IO.Path]::IsPathRooted($GameDir)) { $GameDir } else { (Resolve-Path $GameDir).Path }
@@ -53,11 +54,13 @@ public static class PixelsCheck {
 function HashBytes([byte[]]$b){[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($b)).ToLower()}
 function SavePNG($bitmap,[string]$path){$enc=New-Object Windows.Media.Imaging.PngBitmapEncoder;$enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap));$f=[IO.File]::Create($path);try{$enc.Save($f)}finally{$f.Dispose()}}
 
-# Exclude standees / tachie overlays
-$excludeArchives = @('Archive/data02300.arc', 'Archive/data02310.arc', 'Archive/data02700.arc')
+# Validate individual entries instead of excluding whole archives.
+$excludeArchives = @()
 
 $inv = Get-Content "$root\reports\archive_inventory.json" -Raw | ConvertFrom-Json
 $fmt = New-Object GameRes.Formats.BGI.CompressedBGFormat
+$decoderExe = if ($DecoderPath) { $DecoderPath } else { Join-Path $PSScriptRoot '..\build\jxl_decode_test.exe' }
+if (!(Test-Path $decoderExe)) { throw "Decoder test not found: $decoderExe" }
 $ordinal = 0
 $handled = 0
 
@@ -121,12 +124,19 @@ foreach ($a in $inv) {
     $ms.Dispose()
    }
    $bitmap = $img.Bitmap
-   $expectedFmt = if ($bpp -eq 24) { 'Bgr24' } else { 'Bgra32' }
-   if ($bitmap.Format.ToString() -ne $expectedFmt -or $bitmap.PixelWidth -ne $e.image_header_u16[0] -or $bitmap.PixelHeight -ne $e.image_header_u16[1]) {
+   $fmtName = $bitmap.Format.ToString()
+   $formatOk = if ($bpp -eq 24) { $fmtName -in @('Bgr24','Bgr32') } else { $fmtName -eq 'Bgra32' }
+   if (!$formatOk -or $bitmap.PixelWidth -ne $e.image_header_u16[0] -or $bitmap.PixelHeight -ne $e.image_header_u16[1]) {
     throw "PixelFormat/dimensions not supported: retain ($($bitmap.Format))"
    }
 
-   $channels = if ($bpp -eq 24) { 3 } else { 4 }
+   if ($bpp -eq 24 -and $fmtName -eq 'Bgr32') {
+     $converted = New-Object Windows.Media.Imaging.FormatConvertedBitmap
+     $converted.BeginInit(); $converted.Source = $bitmap; $converted.DestinationFormat = [Windows.Media.PixelFormats]::Bgr24; $converted.EndInit()
+     $bitmap = $converted
+    }
+
+    $channels = if ($bpp -eq 24) { 3 } else { 4 }
    $png = "$tmp\input.png"; $encoded = "$tmp\encoded.jxl"; $decoded = "$tmp\decoded.png"; $envelope = "$tmp\envelope.cbgjxl"; $engine = "$tmp\engine.raw"
    SavePNG $bitmap $png
 
@@ -150,13 +160,13 @@ foreach ($a in $inv) {
     & "$jxl\djxl.exe" $encoded $decoded --num_threads=1 2> "$tmp\decode.log"
     if ($LASTEXITCODE) { throw 'djxl failed' }
 
-    & "$PSScriptRoot\..\build\jxl_decode_test.exe" $envelope $engine > "$tmp\engine.log"
-    if ($LASTEXITCODE) { throw 'x86 decode failed' }
+    & $decoderExe $envelope $engine > "$tmp\engine.log"
+    if ($LASTEXITCODE) { throw 'Native decoder failed' }
 
     $df = [IO.File]::OpenRead($decoded)
     try {
-     $decoder = [Windows.Media.Imaging.BitmapDecoder]::Create($df, [Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat, [Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
-     $bmp = $decoder.Frames[0]
+     $pngDecoder = [Windows.Media.Imaging.BitmapDecoder]::Create($df, [Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat, [Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+     $bmp = $pngDecoder.Frames[0]
     } finally {
      $df.Dispose()
     }
@@ -174,7 +184,7 @@ foreach ($a in $inv) {
     $enginebytes = [IO.File]::ReadAllBytes($engine)
 
     if (![PixelsCheck]::Match($pixels, $enginebytes, $channels)) {
-     throw 'x64 and x86 decoded pixels differ beyond tolerance'
+     throw 'Independent and native decoded pixels differ beyond tolerance'
     }
 
     if ($bpp -eq 24) {

@@ -2,7 +2,9 @@
 
 [Japanese Documentation](README.ja.md)
 
-A universal local JPEG XL (JXL) image decoding compatibility layer for 32-bit visual novel games running on the BGI / Ethornell engine.
+A local JPEG XL (JXL) image decoding compatibility layer for BGI / Ethornell visual novels, with the existing x86 implementation and a separate AMD64 proxy for a verified decoder build.
+
+See [AMD64 support](docs/BGI_X64.md) for the x64 build, regression test, deployment requirements, and current limitations.
 
 It seamlessly enables JXL image compression in BGI game archives by intercepting the engine's internal CBG decompression routine in memory and transparently decoding JXL-encoded payloads while preserving 100% backward compatibility for untouched assets.
 
