@@ -125,9 +125,9 @@ static BOOL CALLBACK setup(PINIT_ONCE, PVOID, PVOID*) {
     }
     DWORD imgSize = nt->OptionalHeader.SizeOfImage;
     unsigned char* entry = NULL;
-    if (0xC00C0 + kStolen <= imgSize && !memcmp(base + 0xC00C0, decoderPrologue, kStolen)) {
-        entry = base + 0xC00C0;
-        logline("Hook target RVA C00C0 (64-bit FD)");
+    if (0xBF7C0 + kStolen <= imgSize && !memcmp(base + 0xBF7C0, decoderPrologue, kStolen)) {
+        entry = base + 0xBF7C0;
+        logline("Hook target RVA BF7C0 (64-bit FD)");
     } else {
         for (size_t off = 0x1000; off + kStolen <= imgSize; ++off) {
             if (!memcmp(base + off, decoderPrologue, kStolen)) {
