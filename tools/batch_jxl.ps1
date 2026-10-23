@@ -23,6 +23,16 @@ public static class PixelsCheck {
  public static int MaxDifference; public static double RMSE;
  public static bool Match(byte[] bmpPixels, byte[] engine, int channels) {
   MaxDifference = 0; double sum = 0;
+  if (channels == 1) {
+   if (engine.Length != 16 + bmpPixels.Length) return false;
+   for (int i = 0, j = 16; i < bmpPixels.Length; i++, j++) {
+    int d = Math.Abs(bmpPixels[i] - engine[j]);
+    if (d > MaxDifference) MaxDifference = d;
+    sum += d * d;
+   }
+   RMSE = Math.Sqrt(sum / bmpPixels.Length);
+   return MaxDifference <= 3 && RMSE <= 1.0;
+  }
   if (engine.Length != 16 + bmpPixels.Length / channels * 4) return false;
   if (channels == 3) {
    for (int i = 0, j = 16; i < bmpPixels.Length; i += 3, j += 4) {
@@ -66,10 +76,15 @@ $handled = 0
 
 foreach ($a in $inv) {
  if ($a.archive -in $excludeArchives) { continue }
+ $hasCbg = $false
+ foreach ($ce in $a.entries) { if ($ce.kind -eq 'cbg') { $hasCbg = $true; break } }
+ if (!$hasCbg) { continue }
+ $fs = [IO.File]::OpenRead((Join-Path "$root\original" $a.archive))
+ try {
  foreach ($e in $a.entries) {
   if ($e.kind -ne 'cbg') { continue }
   $bpp = $e.image_header_u16[2]
-  if ($bpp -ne 24 -and $bpp -ne 32) { continue }
+  if ($bpp -ne 8 -and $bpp -ne 24 -and $bpp -ne 32) { continue }
 
   $slot = $ordinal
   $ordinal++
@@ -86,14 +101,9 @@ foreach ($a in $inv) {
   $dest = "$dir\$($e.index).cbgjxl"
   $statusfile = "$statusdir\${stem}_$($e.index).json"
 
-  $fs = [IO.File]::OpenRead((Join-Path "$root\original" $a.archive))
-  try {
-   $fs.Position = [int64]$e.absolute
-   $raw = New-Object byte[] $e.length
-   $fs.ReadExactly($raw, 0, $raw.Length)
-  } finally {
-   $fs.Dispose()
-  }
+  $fs.Position = [int64]$e.absolute
+  $raw = New-Object byte[] $e.length
+  $fs.ReadExactly($raw, 0, $raw.Length)
   $sha = HashBytes $raw
 
   # Check resume
@@ -113,7 +123,7 @@ foreach ($a in $inv) {
   }
 
   try {
-   if ([BitConverter]::ToUInt16($raw, 22) -ne 0) { throw 'Nonzero layout/association flag: retain' }
+   if ([BitConverter]::ToUInt16($raw, 22) -ne 0 -or [BitConverter]::ToUInt32($raw, 24) -ne 0 -or [BitConverter]::ToUInt32($raw, 28) -ne 0) { throw 'Nonzero layout/association/unknown metadata: retain' }
    $ms = New-Object IO.MemoryStream(,$raw)
    try {
     $bs = New-Object GameRes.BinaryStream($ms, $e.name, $false)
@@ -125,7 +135,7 @@ foreach ($a in $inv) {
    }
    $bitmap = $img.Bitmap
    $fmtName = $bitmap.Format.ToString()
-   $formatOk = if ($bpp -eq 24) { $fmtName -in @('Bgr24','Bgr32') } else { $fmtName -eq 'Bgra32' }
+   $formatOk = if ($bpp -eq 24) { $fmtName -in @('Bgr24','Bgr32') } elseif ($bpp -eq 32) { $fmtName -eq 'Bgra32' } else { $fmtName -eq 'Gray8' }
    if (!$formatOk -or $bitmap.PixelWidth -ne $e.image_header_u16[0] -or $bitmap.PixelHeight -ne $e.image_header_u16[1]) {
     throw "PixelFormat/dimensions not supported: retain ($($bitmap.Format))"
    }
@@ -136,7 +146,7 @@ foreach ($a in $inv) {
      $bitmap = $converted
     }
 
-    $channels = if ($bpp -eq 24) { 3 } else { 4 }
+    $channels = if ($bpp -eq 24) { 3 } elseif ($bpp -eq 32) { 4 } else { 1 }
    $png = "$tmp\input.png"; $encoded = "$tmp\encoded.jxl"; $decoded = "$tmp\decoded.png"; $envelope = "$tmp\envelope.cbgjxl"; $engine = "$tmp\engine.raw"
    SavePNG $bitmap $png
 
@@ -170,7 +180,7 @@ foreach ($a in $inv) {
     } finally {
      $df.Dispose()
     }
-    $targetPixFmt = if ($channels -eq 3) { [Windows.Media.PixelFormats]::Bgr24 } else { [Windows.Media.PixelFormats]::Bgra32 }
+    $targetPixFmt = if ($channels -eq 3) { [Windows.Media.PixelFormats]::Bgr24 } elseif ($channels -eq 4) { [Windows.Media.PixelFormats]::Bgra32 } else { [Windows.Media.PixelFormats]::Gray8 }
     $conv = New-Object Windows.Media.Imaging.FormatConvertedBitmap
     $conv.BeginInit(); $conv.Source = $bmp; $conv.DestinationFormat = $targetPixFmt; $conv.EndInit()
 
@@ -215,5 +225,8 @@ foreach ($a in $inv) {
   $row | ConvertTo-Json | Set-Content "$statusfile.partial" -Encoding utf8
   Move-Item "$statusfile.partial" $statusfile -Force
   if ($handled % 20 -eq 0) { [GC]::Collect() }
+ }
+ } finally {
+  $fs.Dispose()
  }
 }

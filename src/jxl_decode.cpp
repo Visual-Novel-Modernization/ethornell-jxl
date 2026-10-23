@@ -17,11 +17,12 @@ extern "C" __declspec(dllexport) int __cdecl DecodeJxlCBG(void* output,size_t ca
   const unsigned char* p=(const unsigned char*)input;
   if(!output||!input||length<48||memcmp(p,"CompressedBG___",16)||memcmp(p+32,tag,8)||u16(p+46)!=0x4a58) return -1;
   const size_t w=u16(p+16),h=u16(p+18);const unsigned bpp=u16(p+20);
-  if(!w||!h||(bpp!=24&&bpp!=32)||u16(p+22)>1||u32(p+40)!=length-48||w*h>16777216||capacity<16+w*h*4) return -2;
+  const size_t out_px_bytes=(bpp==8)?1:4;
+  if(!w||!h||(bpp!=8&&bpp!=24&&bpp!=32)||u16(p+22)>1||u32(p+40)!=length-48||w*h>67108864||capacity<16+w*h*out_px_bytes) return -2;
   JxlDecoder* d=JxlDecoderCreate(NULL);if(!d)return -3;
   int result=-4;bool info=false,frame=false;
   JxlBasicInfo bi={};
-  uint32_t num_ch=(bpp==32)?4:3;
+  uint32_t num_ch=(bpp==32)?4:((bpp==24)?3:1);
   JxlPixelFormat fmt={num_ch,JXL_TYPE_UINT8,JXL_NATIVE_ENDIAN,0};
   std::vector<unsigned char> pix;
   if(JxlDecoderSubscribeEvents(d,JXL_DEC_BASIC_INFO|JXL_DEC_FULL_IMAGE)!=JXL_DEC_SUCCESS)goto done;
@@ -30,6 +31,7 @@ extern "C" __declspec(dllexport) int __cdecl DecodeJxlCBG(void* output,size_t ca
     JxlDecoderStatus s=JxlDecoderProcessInput(d);
     if(s==JXL_DEC_BASIC_INFO){
       if(JxlDecoderGetBasicInfo(d,&bi)!=JXL_DEC_SUCCESS||bi.xsize!=w||bi.ysize!=h||bi.bits_per_sample!=8||bi.have_animation||bi.orientation!=JXL_ORIENT_IDENTITY)break;
+      if(bpp==8&&(bi.num_color_channels!=1||bi.alpha_bits!=0))break;
       if(bpp==24&&(bi.num_color_channels!=3||bi.alpha_bits!=0))break;
       if(bpp==32&&(bi.num_color_channels!=3))break;
       info=true;
@@ -40,7 +42,9 @@ extern "C" __declspec(dllexport) int __cdecl DecodeJxlCBG(void* output,size_t ca
     }else if(s==JXL_DEC_SUCCESS){
       if(!info||!frame||pix.size()!=w*h*num_ch)break;
       unsigned char* o=(unsigned char*)output;memcpy(o,p+16,16);
-      if(bpp==24){
+      if(bpp==8){
+        memcpy(o+16,pix.data(),w*h);
+      }else if(bpp==24){
         o[4]=32;o[5]=0;o[8]=7;o[9]=0;
         for(size_t i=0;i<w*h;i++){
           o[16+4*i+0]=pix[3*i+2];o[16+4*i+1]=pix[3*i+1];o[16+4*i+2]=pix[3*i+0];o[16+4*i+3]=0;
@@ -61,7 +65,7 @@ int main(int argc,char**argv){
   if(argc!=3){fprintf(stderr,"usage: jxl_decode_test envelope output.raw\n");return 1;}
   FILE*f=fopen(argv[1],"rb");if(!f)return 2;fseek(f,0,SEEK_END);long size=ftell(f);rewind(f);if(size<48||size>67108864){fclose(f);return 3;}
   std::vector<unsigned char> in(size);if(fread(in.data(),1,size,f)!=(size_t)size){fclose(f);return 4;}fclose(f);
-  size_t bytes=16+(size_t)u16(in.data()+16)*u16(in.data()+18)*4;std::vector<unsigned char> out(bytes);
+  unsigned bpp=u16(in.data()+20);size_t bytes=16+(size_t)u16(in.data()+16)*u16(in.data()+18)*(bpp==8?1:4);std::vector<unsigned char> out(bytes);
   int rc=DecodeJxlCBG(out.data(),out.size(),in.data(),in.size());printf("libjxl=%u decode=%d bytes=%u\n",JxlDecoderVersion(),rc,(unsigned)bytes);if(rc)return 5;
   f=fopen(argv[2],"wb");if(!f)return 6;bool ok=fwrite(out.data(),1,out.size(),f)==out.size();fclose(f);return ok?0:7;
 }

@@ -31,8 +31,8 @@ int main(int argc, char** argv) {
         FILE* f=fopen(argv[1],"rb"); if(!f) return 4;
         fseek(f,0,SEEK_END); long n=ftell(f); rewind(f);
         std::vector<unsigned char> in(n); if(fread(in.data(),1,n,f)!=(size_t)n) return 5; fclose(f);
-        uint16_t wh[2]; memcpy(wh,in.data()+16,4);
-        std::vector<unsigned char> out(16+(size_t)wh[0]*wh[1]*4+32,0xCD);
+        uint16_t whb[3]; memcpy(whb,in.data()+16,6);
+        std::vector<unsigned char> out(16+(size_t)whb[0]*whb[1]*(whb[2]==8?1:4)+32,0xCD);
         int rc=TestHookJxl(out.data(),in.data());
         bool guard=true; for(size_t i=out.size()-32;i<out.size();++i) guard &= out[i]==0xCD;
         printf("JXL_hook_result=%d output_guard=%d\n",rc,guard);

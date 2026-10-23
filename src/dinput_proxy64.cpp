@@ -66,17 +66,18 @@ static bool isJxlEnvelope(const unsigned char* in) {
 
 static int hookedDecode(void* out, const unsigned char* in) {
     if (isJxlEnvelope(in)) {
-        uint32_t payload, w, h;
+        uint32_t payload, w, h, bpp;
         memcpy(&payload, in + 40, sizeof(payload));
-        uint16_t wh[2];
-        memcpy(wh, in + 16, sizeof(wh));
-        w = wh[0]; h = wh[1];
+        uint16_t whb[3];
+        memcpy(whb, in + 16, sizeof(whb));
+        w = whb[0]; h = whb[1]; bpp = whb[2];
         size_t len = 48 + (size_t)payload;
-        if (payload > 67108816 || len > 67108864 || !w || !h || (size_t)w * h > 16777216) {
+        if (payload > 67108816 || len > 67108864 || !w || !h || (size_t)w * h > 67108864) {
             logline("JXL envelope rejected: bounds");
             return (int)0x80000004;
         }
-        int rc = DecodeJxlCBG(out, 16 + (size_t)w * h * 4, in, len);
+        size_t cap = 16 + (size_t)w * h * (bpp == 8 ? 1 : 4);
+        int rc = DecodeJxlCBG(out, cap, in, len);
         if (!rc) {
             logline("JXL image decoded through x64 classic BGI ABI");
             return 0;
@@ -125,9 +126,12 @@ static BOOL CALLBACK setup(PINIT_ONCE, PVOID, PVOID*) {
     }
     DWORD imgSize = nt->OptionalHeader.SizeOfImage;
     unsigned char* entry = NULL;
-    if (0xBF7C0 + kStolen <= imgSize && !memcmp(base + 0xBF7C0, decoderPrologue, kStolen)) {
+    if (0xC00C0 + kStolen <= imgSize && !memcmp(base + 0xC00C0, decoderPrologue, kStolen)) {
+        entry = base + 0xC00C0;
+        logline("Hook target RVA C00C0 (64-bit FD)");
+    } else if (0xBF7C0 + kStolen <= imgSize && !memcmp(base + 0xBF7C0, decoderPrologue, kStolen)) {
         entry = base + 0xBF7C0;
-        logline("Hook target RVA BF7C0 (64-bit FD)");
+        logline("Hook target RVA BF7C0 (64-bit Triple Pairing)");
     } else {
         for (size_t off = 0x1000; off + kStolen <= imgSize; ++off) {
             if (!memcmp(base + off, decoderPrologue, kStolen)) {

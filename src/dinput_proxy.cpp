@@ -112,6 +112,24 @@ static BOOL CALLBACK setup(PINIT_ONCE, PVOID, PVOID*) {
         entry = base + 0xc61f0;
         logline("Hook installing: target RVA C61F0");
     }
+    // Cinderella mini fandisc: Japanese and Kuzushita Chinese builds.
+    // Confirmed CompressedBG___ xref RVA 76F7E; fastcall ECX=out, EDX=in.
+    else if (0x76f60 + 8 <= imgSize && !memcmp(base + 0x76f60, signature, 8)) {
+        entry = base + 0x76f60;
+        logline("Hook installing: target RVA 76F60 (Cinderella FD JP/CN)");
+    }
+    // Cinderella2 main game: Japanese and Kuzushita Chinese builds.
+    // Confirmed CompressedBG___ xref RVA 77A2E; same classic decoder ABI.
+    else if (0x77a10 + 8 <= imgSize && !memcmp(base + 0x77a10, signature, 8)) {
+        entry = base + 0x77a10;
+        logline("Hook installing: target RVA 77A10 (Cinderella2 JP/CN)");
+    }
+    // OshiRabu official Chinese release (SHA256 97168901...83262136).
+    // Static CBG string/caller analysis confirms ECX=out, EDX=CBG start.
+    else if (0x74ce0 + 8 <= imgSize && !memcmp(base + 0x74ce0, signature, 8)) {
+        entry = base + 0x74ce0;
+        logline("Hook installing: target RVA 74CE0 (OshiRabu)");
+    }
     // Scan .text as fallback for custom builds or patches
     else if (imgSize > 0x1000) {
         DWORD scanEnd = (imgSize > 0x200000) ? 0x200000 : imgSize;
@@ -127,8 +145,10 @@ static BOOL CALLBACK setup(PINIT_ONCE, PVOID, PVOID*) {
     }
 
     if (!entry) {
-        logline("Hook disabled: decoder prologue mismatch");
-        return TRUE;
+        // Packed builds may import this proxy before their engine code is expanded.
+        // Leave INIT_ONCE incomplete so DirectInput8Create retries synchronously.
+        logline("Hook deferred: decoder prologue not available");
+        return FALSE;
     }
 
     unsigned char* tramp = (unsigned char*)VirtualAlloc(NULL, 13, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
